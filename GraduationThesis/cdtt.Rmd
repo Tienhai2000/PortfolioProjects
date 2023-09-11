@@ -1,0 +1,243 @@
+---
+title: "CDTT"
+author: "Ta Tien Hai"
+date: '2022-03-12'
+output: word_document
+---
+
+Import data and package
+
+```{r}
+library(vars);
+library(VARtests);
+library(urca);
+library(forecast)
+library(tseries);
+library(urca);
+library(FitAR);
+library(zoo);
+library(tsDyn);
+library(tidyverse);
+library(GGally)
+library(readxl)
+macrodat <- read_excel("macrodat.xlsx")
+cpi=c
+m2=ts(macrodat$m2,start = c(2012,4),end = c(2021,12),frequency = 12)
+exc=ts(macrodat$exc,start = c(2012,4),end = c(2021,12),frequency = 12)
+bot=ts(macrodat$bot,start = c(2012,4),end = c(2021,12),frequency = 12)
+vnindex=ts(macrodat$vnindex,start = c(2012,4),end = c(2021,12),frequency = 12)
+```
+
+EDA
+
+```{r}
+str(macrodat)
+# Create timeline
+year = as.character(macrodat$Year)
+mon = as.character(macrodat$Month) %>% str_sub(2,3)
+timeline=str_c(year,mon,sep="-") %>% as.yearmon()
+visdat = data.frame(timeline,vnindex,m2,exc,bot,cpi)
+# Visualize
+## CPI
+ggplot(visdat,aes(x=timeline, y=cpi))+
+  geom_line()+
+  labs(x="Time (month)", y="CPI",
+       title="Vietnam CPI (Apr 2012 - Dec 2021)",
+       caption="Source: GSO")
+
+## m2
+ggplot(visdat,aes(x=timeline, y=m2))+
+  geom_line()+
+  labs(x="Time (month)", y="M2 (tỷ đồng)",
+       title="Vietnam Money Supply M2 (Apr 2012 - Dec 2021)",
+       caption="Source: SBV")
+
+## exc
+ggplot(visdat,aes(x=timeline, y=exc))+
+  geom_line()+
+  labs(x="Time (month)", y="Exchange Rate USD/VND",
+       title="Average Exchange Rate USD/VND (Apr 2012 - Dec 2021)",
+       caption="Source: Investing.com")
+
+## bot
+ggplot(visdat,aes(x=timeline, y=bot))+
+  geom_line()+
+  labs(x="Time (month)", y="Balance of Trade (thousand USD)",
+       title="Vietnam Balance of Trade (Apr 2012 - Dec 2021)",
+       caption="Source: GSO")
+
+## VNINDEX
+ggplot(visdat,aes(x=timeline, y=vnindex))+
+  geom_line()+
+  labs(x="Time (month)", y="VNINDEX",
+       title="VNINDEX (Apr 2012 - Dec 2021)",
+       caption="Source: Investing.com")
+
+# Pair plot
+ggpairs(visdat[,-1])
+```
+
+Stationary
+
+```{r}
+# normalize data
+norm=function(dat,rng=c(0,1)){
+  min=rng[1];max=rng[2]
+  std_dat=(dat-min(dat))/(max(dat)-min(dat))
+  scaled_dat=std_dat*(rng[2]-rng[1])+rng[1]
+  return(scaled_dat=as.vector(scaled_dat))
+}
+cpi=norm(cpi); m2=norm(m2); exc=norm(exc); bot=norm(bot); vnindex=norm(vnindex)
+
+# cpi I(0)
+summary(ur.df(cpi, type = c("drift"), selectlags="AIC"))
+acf(cpi, lag.max = 10, plot=TRUE,na.action = na.contiguous)
+pacf(cpi, lag.max = 10, plot=TRUE,na.action = na.contiguous)
+
+# m2 I(0)
+summary(ur.df (m2, type = c("trend"), selectlags="AIC"))
+acf(m2, lag.max = 10, plot=TRUE,na.action = na.contiguous)
+pacf(m2, lag.max = 10, plot=TRUE,na.action = na.contiguous)
+
+# m2 I(1)
+summary(ur.df(diff(m2), type = c("drift"), selectlags="AIC"))
+acf(diff(m2), lag.max = 10, plot=TRUE,na.action = na.contiguous)
+pacf(diff(m2), lag.max = 10, plot=TRUE,na.action = na.contiguous)
+
+# exc I(0)
+summary(ur.df(exc, type = c("trend"), selectlags="AIC"))
+acf(exc, lag.max = 10, plot=TRUE,na.action = na.contiguous)
+pacf(exc, lag.max = 10, plot=TRUE,na.action = na.contiguous) 
+
+# exc I(1)
+summary(ur.df(diff(exc), type = c("drift"), selectlags="AIC"))
+acf(diff(exc), lag.max = 10, plot=TRUE,na.action = na.contiguous)
+pacf(diff(exc), lag.max = 10, plot=TRUE,na.action = na.contiguous)
+
+# bot I(0)
+summary(ur.df(bot, type = c("drift"), selectlags="AIC"))
+acf(bot, lag.max = 10, plot=TRUE,na.action = na.contiguous)
+pacf(bot, lag.max = 10, plot=TRUE,na.action = na.contiguous)
+
+# vnindex I(0)
+summary(ur.df(vnindex, type = c("trend"), selectlags="AIC"))
+acf(vnindex, lag.max = 10, plot=TRUE,na.action = na.contiguous)
+pacf(vnindex, lag.max = 10, plot=TRUE,na.action = na.contiguous)
+
+# vnindex I(1)
+summary(ur.df(diff(vnindex), type = c("drift"), selectlags="AIC"))
+acf(diff(vnindex), lag.max = 10, plot=TRUE,na.action = na.contiguous)
+pacf(diff(vnindex), lag.max = 10, plot=TRUE,na.action = na.contiguous)
+```
+
+Estimate VECM model
+
+```{r}
+Series2=cbind(vnindex,m2,exc,bot,cpi)
+
+#chon lag 1
+VARselect(Series2, lag.max = 10, type = "const") 
+
+#Kiem tra so quan he dong tich hop (r=1)
+ctest1tr=ca.jo(Series2, type="trace", ecdet="trend", K=2)
+summary(ctest1tr)
+
+#Uoc luong VECM
+VECM1= VECM(Series2, lag=1, r=1, include = c("both"), LRinclude = c("const"), estim ="ML")
+summary(VECM1)
+
+#Bien doi thanh VAR
+VECM2VAR=vec2var(ctest1tr,r=1)
+```
+
+```{r}
+#Kiem dinh phan du (ok)
+VECM2VARresiduals = resid(VECM2VAR)
+Box.test(VECM2VARresiduals[,1])
+Box.test(VECM2VARresiduals[,2])
+Box.test(VECM2VARresiduals[,3])
+Box.test(VECM2VARresiduals[,4])
+Box.test(VECM2VARresiduals[,5])
+
+#Serial Correlation
+serial.test(VECM2VAR, lags.pt = 8, type="PT.asymptotic")
+
+# Heteroscedasticity 
+arch.test(VECM2VAR,lags.multi=12,multivariate.only=TRUE)
+```
+
+
+```{r}
+##Granger Causality
+causality(VECM2VAR, cause="cpi")
+causality(VECM2VAR, cause="dm2")
+causality(VECM2VAR, cause="dexc")
+causality(VECM2VAR, cause="bot")
+causality(VECM2VAR, cause="dvnindex")
+```
+
+
+```{r}
+#Calculate IRF
+VECM2VAR %>% irf(impulse="vnindex", n.ahead=10) %>% plot(main="Shock from VNINDEX")
+VECM2VAR %>% irf(impulse="m2", n.ahead=10) %>% plot(main="Shock from M2")
+VECM2VAR %>% irf(impulse="exc", n.ahead=10) %>% plot(main="Shock from EXC")
+VECM2VAR %>% irf(impulse="bot", n.ahead=10) %>% plot(main="Shock from BOT")
+VECM2VAR %>% irf(impulse="cpi", n.ahead=10) %>% plot(main="Shock from CPI")
+
+# Variance Decomposition
+VD1=fevd(VECM2VAR, n.hat=4) %>% unname()
+period=rep(1:10,5) %>% sort()
+Variable=rep(c("VNINDEX","M2","Exchange Rate USD/VND","Balance of Trade","CPI"),10)
+VD1_cpi=VD1[1] %>% as.data.frame() %>% pivot_longer(cols = 1:5,names_to = "var",values_to = "per") %>% data.frame(period,Variable)
+VD1_m2=VD1[2] %>% as.data.frame() %>% pivot_longer(cols = 1:5,names_to = "var",values_to = "per") %>% data.frame(period,Variable)
+VD1_exc=VD1[3] %>% as.data.frame() %>% pivot_longer(cols = 1:5,names_to = "var",values_to = "per") %>% data.frame(period,Variable)
+VD1_bot=VD1[4] %>% as.data.frame() %>% pivot_longer(cols = 1:5,names_to = "var",values_to = "per") %>% data.frame(period,Variable)
+VD1_vnindex=VD1[5] %>% as.data.frame() %>% pivot_longer(cols = 1:5,names_to = "var",values_to = "per") %>% data.frame(period,Variable)
+fevd2=fevd(VECM2VAR)
+fevd2
+
+## Explain for VNINDEX
+ggplot(data = VD1_vnindex, aes(x=period,y=per*100,color=Variable))+
+  geom_line()+
+  labs(x="Period (month)",y="%",title="Variance Decomposition of VNINDEX",
+       caption="Source: Author",subtitle="TThe explanation for the variation of VNINDEX (Calculated from VECM model)")+
+  ylim(0,100)
+
+## Explain for M2
+ggplot(data = VD1_m2, aes(x=period,y=per*100,color=Variable))+
+  geom_line()+
+  labs(x="Period (month)",y="%",title="Variance Decomposition of M2",
+       caption="Source: Author",subtitle="The explanation for the variation of M2 (Calculated from VECM model)")+
+  ylim(0,100)
+
+## Explain for EXC
+ggplot(data = VD1_exc, aes(x=period,y=per*100,color=Variable))+
+  geom_line()+
+  labs(x="Period (month)",y="%",title="Variance Decomposition of Exchange Rate USD/VND",
+       caption="Source: Author",subtitle="The explanation for the variation of EXC (Calculated from VECM model)")+
+  ylim(0,100)
+
+## Explain for BOT
+ggplot(data = VD1_bot, aes(x=period,y=per*100,color=Variable))+
+  geom_line()+
+  labs(x="Period (month)",y="%",title="Variance Decomposition of Balance of Trade",
+       caption="Source: Author",subtitle="The explanation for the variation of BoT (Calculated from VECM model)")+
+  ylim(0,100)
+```
+
+
+```{r}
+## Explain for CPI
+ggplot(data = VD1_cpi, aes(x=period,y=per*100,color=Variable))+
+  geom_line()+
+  labs(x="Period (month)",y="%",title="Variance Decomposition of CPI",
+       caption="Source: Author",subtitle="The explanation for the variation of CPI (Calculated from VECM model)")+
+  ylim(0,100)
+FevdSeries=predict(VECM2VAR, n.head=10, ci=0.95)
+fanchart(FevdSeries, names="vnindex")
+fanchart(FevdSeries, names="m2")
+fanchart(FevdSeries, names="cpi")
+fanchart(FevdSeries, names="bot")
+fanchart(FevdSeries, names="exc")
+```
